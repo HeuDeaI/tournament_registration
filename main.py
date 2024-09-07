@@ -2,6 +2,7 @@ import telebot
 import os
 import sqlite3
 import json
+import pprint
 from dotenv import load_dotenv
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
@@ -11,60 +12,70 @@ API_TOKEN = os.getenv("BOT_TOKEN")
 
 bot = telebot.TeleBot(API_TOKEN)
 
-def get_teams():
-    connection = sqlite3.connect('teams.db')
-    cursor = connection.cursor()
-    cursor.execute('SELECT * FROM teams')
-    rows = cursor.fetchall()
-    connection.close()
-    teams = []
-    for row in rows:
-        teams.append({
-            "id": row[0],
-            "number": row[1],
-            "captain": row[2],
-            "members": json.loads(row[3])
-        })
+def get_users():
+    users = []
+    with sqlite3.connect('users.db') as connection:
+        cursor = connection.cursor()
+        cursor.execute('''
+            SELECT * FROM users
+            ORDER BY team_number, is_captain DESC
+        ''')
+        rows = cursor.fetchall()
+        users = [
+            {
+                "id": row[0],
+                "user_id": row[1],
+                "user_name": row[2],
+                "team_number": row[3],
+                "is_captain": row[4]
+            }
+            for row in rows
+        ]
+    return users
+
+def get_teams(users):
+    teams = {i: [] for i in range(1, 9)} 
+
+    for user in users:
+        team_number = user['team_number']
+        teams[team_number].append(user)  
+
     return teams
 
-teams = get_teams()
-current_team_number = 0
 
-def redirect_message(message, redirect_text):
-    sent_message = bot.send_message(message.chat.id, redirect_text, reply_markup=ReplyKeyboardRemove())  
-    bot.delete_message(message.chat.id, sent_message.id)
+    
+users = get_users()
+teams = get_teams(users)
 
 @bot.message_handler(commands=['start'])
 def choose_action(message):
-    redirect_message(message, "Перемещение в главное меню...")
-    reply_markup = ReplyKeyboardMarkup(row_width=1)
+    reply_markup = ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
     join_team = KeyboardButton("👥 Присоедениться к команде")
     view_teams = KeyboardButton("👀 Посмотреть список всех команд")
     my_team = KeyboardButton("🧑‍💻 Моя команда")
     reply_markup.add(join_team, view_teams, my_team)
     bot.send_message(message.chat.id, "📍 Главное меню: ", reply_markup=reply_markup)
 
-@bot.message_handler(func=lambda message: message.text.strip() in ["👥 Присоедениться к команде", "👀 Посмотреть список всех команд", "⛔ Нет, вернуться назад"])
+@bot.message_handler(func=lambda message: message.text in ["👥 Присоедениться к команде", "⛔ Нет, вернуться назад"])
 def handle_action(message):
-    redirect_message(message, "Формируем список команд...")
-    if message.text == "👥 Присоедениться к команде" or message.text == "⛔ Нет, вернуться назад":
-        markup = InlineKeyboardMarkup()
-        for i, team in enumerate(teams):
-            team_name = f"{team['number']} Команда: {team['captain']}" if team['captain'] else f"{team['number']} Пустая команда"
-            markup.add(InlineKeyboardButton(team_name, callback_data=f"team{i+1}"))
-        markup.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
-        bot.send_message(message.chat.id, "👇 Выберите команду: ", reply_markup=markup)
-    elif message.text == "👀 Посмотреть список всех команд":
-        team_list = "Список всех команд: \n\n"
-        for team in teams:
-            if team['members']:
-                members_list = "\n".join([f"{i+1}. {member}" for i, member in enumerate(team['members'])])
-            else:
-                members_list = "Пусто 🤷‍♂️"   
-            team_list += f"{team['number']} Команда:\n{members_list} \n\n"
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
-        bot.send_message(message.chat.id, team_list, reply_markup=markup)
+    markup = InlineKeyboardMarkup()
+    for i in range(1, 9):
+        team_preview = f"{i}\uFE0F\u20E3 Команда: {next((user['user_name'] for user in teams[i] if user['is_captain'] == True), 'пусто')}"
+        markup.add(InlineKeyboardButton(team_preview, callback_data=f"team{i}"))
+    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
+    bot.send_message(message.chat.id, "👇 Выберите команду: ", reply_markup=markup)
+        
+
+@bot.message_handler(func=lambda message: message.text == "👀 Посмотреть список всех команд")
+def view_teams(message):
+    teams_list = "\n\n".join(
+        f"{i}\uFE0F\u20E3 Команда:\n" +
+        ("\n".join(f"{u}. {user['user_name']}" for u, user in enumerate(teams[i], start=1)) or "Пусто 🤷‍♂️")
+        for i in range(1, 9))
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
+    bot.send_message(message.chat.id, teams_list, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "back")
 def choose_action_callback(call):
@@ -72,32 +83,19 @@ def choose_action_callback(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('team'))
 def handle_team_selection(call):
-    redirect_message(call.message, "Формируем список участников команды...")
-    global current_team_number
-    current_team_number = int(call.data.replace('team', '')) - 1
-    team = teams[current_team_number]
-    if team['members']:
-        members_list = "\n".join([f"{i+1}. {member}" for i, member in enumerate(team['members'])])
-    else:
-        members_list = "Пусто 🤷‍♂️"
-    team_members_message = f"{team['number']} Команда:\n{members_list} \n\nВы действительно хотите присоедниться к команде?"
-    reply_markup = ReplyKeyboardMarkup(row_width=1)
-    join_team = KeyboardButton("👌 Да, присоедениться!")
+    current_team_number = int(call.data.replace('team', ''))
+    members_list = "\n".join(f"{i}. {user['user_name']}" for i, user in enumerate(teams[current_team_number], start=1)) or "Пусто 🤷‍♂️"
+    team_members_message = f"{current_team_number}\uFE0F\u20E3 Команда:\n{members_list} \n\nВы действительно хотите присоедниться к команде?"
+    reply_markup = ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    join_team = KeyboardButton(f"👌 Да, присоедениться к команде {current_team_number}\uFE0F\u20E3!")
     view_teams = KeyboardButton("⛔ Нет, вернуться назад")
     reply_markup.add(join_team, view_teams)
     bot.answer_callback_query(call.id, team_members_message)
     bot.send_message(call.message.chat.id, team_members_message, reply_markup=reply_markup)
 
-def user_exists_in_any_team(user):
-    teams = get_teams()
-    for team in teams:
-        if user in team['members']:
-            return True
-    return False
-
 @bot.message_handler(func=lambda message: message.text == "👌 Да, присоедениться!")
 def join_team(message):
-    redirect_message(message, "Добавляем вас в команду...")
+    # current_team_number = 
     if message.from_user.username:
         user = "@" + message.from_user.username
     else: 
