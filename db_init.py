@@ -31,27 +31,30 @@ def insert_random_users(num_users=10):
     with sqlite3.connect('users.db') as connection:
         cursor = connection.cursor()
         teams_with_captains = set()  # Track teams that already have a captain
-        
+
         for _ in range(num_users):
             user_id = random.randint(1, 10000)  # Random user_id
-            user_name = random_string()  # Random user_name
+            user_name = '@' + random_string()  # Random user_name starting with '@'
             team_number = random.randint(1, 8)  # Random team_number between 1 and 8
-            
-            if team_number not in teams_with_captains or random.choice([True, False]):
-                is_captain = 1 if team_number not in teams_with_captains and random.choice([True, False]) else 0
-                if is_captain:
-                    teams_with_captains.add(team_number)  # Add team to the set if a captain is assigned
+
+            # Check if the team already has a captain
+            if team_number not in teams_with_captains:
+                # Assign a captain if no captain exists in the team
+                is_captain = 1
+                teams_with_captains.add(team_number)  # Add the team to the set of teams with captains
             else:
+                # If the team already has a captain, set is_captain to 0
                 is_captain = 0
-            
+
             cursor.execute('''
                 INSERT INTO users (user_id, user_name, team_number, is_captain)
                 VALUES (?, ?, ?, ?)
             ''', (user_id, user_name, team_number, is_captain))
-        
+
         connection.commit()
 
 # Insert 10 random users
 insert_random_users(10)
+
 
 
