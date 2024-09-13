@@ -97,9 +97,11 @@ def set_new_captain(user):
         connection.commit()
 
 def create_emoji_number(number):
+    """Create emoji from number"""
     return str(number) + "\uFE0F\u20E3"
 
 def update_users():
+    """Update user database"""
     global users, teams
     users = get_users()
     teams = get_teams(users)

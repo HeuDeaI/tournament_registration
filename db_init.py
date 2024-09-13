@@ -18,6 +18,7 @@ with sqlite3.connect('users.db') as connection:
     connection.commit()
 
 
+# Code for testing database
 import sqlite3
 import random
 import string
@@ -54,7 +55,4 @@ def insert_random_users(num_users=10):
         connection.commit()
 
 # Insert 10 random users
-insert_random_users(10)
-
-
-
+# insert_random_users(10) # Commented for clear initalize
